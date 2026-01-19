@@ -3,9 +3,11 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logger } from "../utils/logger";
 
 // Initialize Gemini
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY || "AIzaSyBCBz3wQu9Jjd_icCDZf-17CUO_O8IynwI"
-);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+  logger.error("GEMINI_API_KEY is not set in environment variables");
+}
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || "");
 
 // Function to handle chat message processing
 export const processChatMessage = inngest.createFunction(
