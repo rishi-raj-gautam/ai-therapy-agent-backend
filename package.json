@@ -8,7 +8,6 @@
     "dev": "nodemon src/index.ts",
     "inngest:dev": "npx inngest-cli dev --url http://localhost:3001/api/inngest",
     "build": "tsc",
-    "postinstall": "npm run build",
     "test": "jest"
   },
   "dependencies": {

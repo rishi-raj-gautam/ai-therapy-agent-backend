@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { register, login, logout } from "../controllers/authController";
 import { auth } from "../middleware/auth";
 
@@ -14,7 +14,7 @@ router.post("/login", login);
 router.post("/logout", auth, logout);
 
 // GET /auth/me
-router.get("/me", auth, (req, res) => {
+router.get("/me", auth, (req: Request, res: Response) => {
   res.json({ user: req.user });
 });
 

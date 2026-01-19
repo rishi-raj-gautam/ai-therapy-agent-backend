@@ -49,9 +49,11 @@ Fill in the following settings:
 - **Branch**: `main` (or your default branch)
 - **Root Directory**: Leave empty (or `.` if needed)
 - **Runtime**: `Node`
-- **Build Command**: `npm install && npm run build`
+- **Build Command**: `NODE_ENV=development npm install && npm run build`
 - **Start Command**: `npm start`
 - **Plan**: Select **Free** (or upgrade if needed)
+  
+  **Note**: If you're using `render.yaml`, these settings will be auto-configured.
 
 **Advanced Settings (Optional):**
 - If you created `render.yaml`, Render will auto-detect it

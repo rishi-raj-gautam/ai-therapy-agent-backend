@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -34,7 +34,7 @@ app.use(
 // OnaF6EGHhgYY9OPv
 
 // Routes
-app.get("/health", (req, res) => {
+app.get("/health", (req: Request, res: Response) => {
   res.json({ status: "ok", message: "Server is running" });
 });
 
