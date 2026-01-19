@@ -49,7 +49,7 @@ Fill in the following settings:
 - **Branch**: `main` (or your default branch)
 - **Root Directory**: Leave empty (or `.` if needed)
 - **Runtime**: `Node`
-- **Build Command**: `NODE_ENV=development npm install && npm run build`
+- **Build Command**: `npm install && npm run build`
 - **Start Command**: `npm start`
 - **Plan**: Select **Free** (or upgrade if needed)
   
