@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ai-therapy-agent-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Add your environment variables in Render dashboard:
+      # - MONGODB_URI
+      # - INNGEST_SIGNING_KEY
+      # - INNGEST_EVENT_KEY
+      # - GEMINI_API_KEY
+      # - JWT_SECRET (if you use JWT)
+      # - Any other required env vars
