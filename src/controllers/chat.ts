@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { ChatSession, IChatSession } from "../models/ChatSession";
+import { Mood } from "../models/Mood";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger";
@@ -79,6 +80,12 @@ export const sendMessage = async (req: Request, res: Response) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
+    // Fetch latest mood entry for this user to provide emotional context
+    const latestMood = await Mood.findOne({ userId })
+      .sort({ timestamp: -1 })
+      .lean()
+      .exec();
+
     // Create Inngest event for message processing
     const event: InngestEvent = {
       name: "therapy/session.message",
@@ -87,7 +94,13 @@ export const sendMessage = async (req: Request, res: Response) => {
         history: session.messages,
         memory: {
           userProfile: {
-            emotionalState: [],
+            emotionalState: latestMood
+              ? [
+                  `score=${latestMood.score}, note=${
+                    latestMood.note ?? "none"
+                  }, timestamp=${latestMood.timestamp.toISOString()}`,
+                ]
+              : [],
             riskLevel: 0,
             preferences: {},
           },
@@ -114,9 +127,31 @@ export const sendMessage = async (req: Request, res: Response) => {
     // Process the message directly using Gemini
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
+    // Build a formatted conversation history for context (use the last 10 exchanges to keep it concise)
+    const recentHistory = session.messages.slice(-20);
+    const formattedHistory =
+      recentHistory.length > 0
+        ? recentHistory
+            .map((m) => {
+              const speaker = m.role === "user" ? "User" : "Therapist";
+              return `${speaker}: ${m.content}`;
+            })
+            .join("\n")
+        : "No previous messages. This is the first message.";
+
     // Analyze the message
-    const analysisPrompt = `Analyze this therapy message and provide insights. Return ONLY a valid JSON object with no markdown formatting or additional text.
-    Message: ${message}
+    const analysisPrompt = `You are analyzing a message in the context of an ongoing therapy session.
+
+    The user's latest tracked mood (if any) is:
+    ${latestMood ? JSON.stringify(latestMood) : "No mood data recorded yet."}
+
+    Analyze this therapy message and provide insights. Return ONLY a valid JSON object with no markdown formatting or additional text.
+    Full conversation so far:
+    ${formattedHistory}
+
+    Latest user message:
+    ${message}
+
     Context: ${JSON.stringify({
       memory: event.data.memory,
       goals: event.data.goals,
@@ -142,9 +177,19 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     // Generate therapeutic response
     const responsePrompt = `${event.data.systemPrompt}
-    
-    Based on the following context, generate a therapeutic response:
-    Message: ${message}
+
+    You are continuing an ongoing therapeutic conversation. Maintain continuity with prior messages and be sensitive to the user's most recent mood.
+
+    Latest tracked mood (if any):
+    ${latestMood ? JSON.stringify(latestMood) : "No recent mood entry."}
+
+    Conversation so far:
+    ${formattedHistory}
+
+    Latest user message:
+    ${message}
+
+    Based on the following analysis and context, generate a therapeutic response:
     Analysis: ${JSON.stringify(analysis)}
     Memory: ${JSON.stringify(event.data.memory)}
     Goals: ${JSON.stringify(event.data.goals)}
