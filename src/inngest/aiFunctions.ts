@@ -9,6 +9,51 @@ if (!GEMINI_API_KEY) {
 }
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || "");
 
+const defaultModelCandidates = [
+  // Generally available for most accounts:
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  // Kept as a last resort for accounts that still have access:
+  "gemini-2.0-flash",
+];
+
+function getModelCandidates() {
+  const envCandidates = process.env.GEMINI_MODEL_CANDIDATES
+    ? process.env.GEMINI_MODEL_CANDIDATES.split(",").map((s) => s.trim())
+    : [];
+  const envSingle = process.env.GEMINI_MODEL?.trim();
+
+  const candidates = envCandidates.length
+    ? envCandidates
+    : envSingle
+      ? [envSingle, ...defaultModelCandidates]
+      : defaultModelCandidates;
+
+  // De-duplicate while keeping order
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+async function generateContentWithFallback(prompt: string) {
+  const candidates = getModelCandidates();
+  let lastError: unknown = null;
+
+  for (const modelName of candidates) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      return await model.generateContent(prompt);
+    } catch (error) {
+      lastError = error;
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn("Gemini model failed, trying next model", {
+        modelName,
+        msg,
+      });
+    }
+  }
+
+  throw lastError;
+}
+
 // Function to handle chat message processing
 export const processChatMessage = inngest.createFunction(
   {
@@ -43,8 +88,6 @@ export const processChatMessage = inngest.createFunction(
       // Analyze the message using Gemini
       const analysis = await step.run("analyze-message", async () => {
         try {
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
           const prompt = `Analyze this therapy message and provide insights. Return ONLY a valid JSON object with no markdown formatting or additional text.
           Message: ${message}
           Context: ${JSON.stringify({ memory, goals })}
@@ -58,7 +101,7 @@ export const processChatMessage = inngest.createFunction(
             "progressIndicators": ["string"]
           }`;
 
-          const result = await model.generateContent(prompt);
+          const result = await generateContentWithFallback(prompt);
           const response = await result.response;
           const text = response.text().trim();
 
@@ -110,8 +153,6 @@ export const processChatMessage = inngest.createFunction(
       // Generate therapeutic response
       const response = await step.run("generate-response", async () => {
         try {
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
           const prompt = `${systemPrompt}
           
           Based on the following context, generate a therapeutic response:
@@ -127,7 +168,7 @@ export const processChatMessage = inngest.createFunction(
           4. Maintains professional boundaries
           5. Considers safety and well-being`;
 
-          const result = await model.generateContent(prompt);
+          const result = await generateContentWithFallback(prompt);
           const responseText = result.response.text().trim();
 
           logger.info("Generated response:", { responseText });
@@ -180,8 +221,6 @@ export const analyzeTherapySession = inngest.createFunction(
 
       // Analyze the session using Gemini
       const analysis = await step.run("analyze-with-gemini", async () => {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
         const prompt = `Analyze this therapy session and provide insights:
         Session Content: ${sessionContent}
         
@@ -194,7 +233,7 @@ export const analyzeTherapySession = inngest.createFunction(
         
         Format the response as a JSON object.`;
 
-        const result = await model.generateContent(prompt);
+        const result = await generateContentWithFallback(prompt);
         const response = await result.response;
         const text = response.text();
 
@@ -250,8 +289,6 @@ export const generateActivityRecommendations = inngest.createFunction(
       const recommendations = await step.run(
         "generate-recommendations",
         async () => {
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
           const prompt = `Based on the following user context, generate personalized activity recommendations:
         User Context: ${JSON.stringify(userContext)}
         
@@ -264,7 +301,7 @@ export const generateActivityRecommendations = inngest.createFunction(
         
         Format the response as a JSON object.`;
 
-          const result = await model.generateContent(prompt);
+          const result = await generateContentWithFallback(prompt);
           const response = await result.response;
           const text = response.text();
 

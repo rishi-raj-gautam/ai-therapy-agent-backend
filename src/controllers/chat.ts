@@ -16,6 +16,51 @@ if (!GEMINI_API_KEY) {
 }
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || "");
 
+const defaultModelCandidates = [
+  // Generally available for most accounts:
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  // Kept as a last resort for accounts that still have access:
+  "gemini-2.0-flash",
+];
+
+function getModelCandidates() {
+  const envCandidates = process.env.GEMINI_MODEL_CANDIDATES
+    ? process.env.GEMINI_MODEL_CANDIDATES.split(",").map((s) => s.trim())
+    : [];
+  const envSingle = process.env.GEMINI_MODEL?.trim();
+
+  const candidates = envCandidates.length
+    ? envCandidates
+    : envSingle
+      ? [envSingle, ...defaultModelCandidates]
+      : defaultModelCandidates;
+
+  // De-duplicate while keeping order
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+async function generateContentWithFallback(prompt: string): Promise<any> {
+  const candidates = getModelCandidates();
+  let lastError: unknown = null;
+
+  for (const modelName of candidates) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      return await model.generateContent(prompt);
+    } catch (error) {
+      lastError = error;
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn("Gemini model failed, trying next model", {
+        modelName,
+        msg,
+      });
+    }
+  }
+
+  throw lastError;
+}
+
 // Create a new chat session
 export const createChatSession = async (req: Request, res: Response) => {
   try {
@@ -138,9 +183,6 @@ export const sendMessage = async (req: Request, res: Response) => {
       });
     }
 
-    // Process the message directly using Gemini
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
     // Build a formatted conversation history for context (use the last 10 exchanges to keep it concise)
     const recentHistory = session.messages.slice(-20);
     const formattedHistory =
@@ -188,7 +230,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       progressIndicators: string[];
     };
     try {
-      const analysisResult = await model.generateContent(analysisPrompt);
+      const analysisResult = await generateContentWithFallback(analysisPrompt);
       const analysisText = analysisResult.response.text().trim();
       const cleanAnalysisText = analysisText
         .replace(/```json\n|\n```/g, "")
@@ -262,7 +304,7 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     let response = "";
     try {
-      const responseResult = await model.generateContent(responsePrompt);
+      const responseResult = await generateContentWithFallback(responsePrompt);
       response = responseResult.response.text().trim();
     } catch (responseError) {
       logger.error("Gemini response generation failed", { responseError });
