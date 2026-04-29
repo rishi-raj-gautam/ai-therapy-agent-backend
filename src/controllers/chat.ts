@@ -86,6 +86,13 @@ export const sendMessage = async (req: Request, res: Response) => {
       .lean()
       .exec();
 
+    const moodTimestamp =
+      latestMood?.timestamp instanceof Date
+        ? latestMood.timestamp.toISOString()
+        : latestMood?.timestamp
+        ? new Date(latestMood.timestamp).toISOString()
+        : "unknown";
+
     // Create Inngest event for message processing
     const event: InngestEvent = {
       name: "therapy/session.message",
@@ -98,7 +105,7 @@ export const sendMessage = async (req: Request, res: Response) => {
               ? [
                   `score=${latestMood.score}, note=${
                     latestMood.note ?? "none"
-                  }, timestamp=${latestMood.timestamp.toISOString()}`,
+                  }, timestamp=${moodTimestamp}`,
                 ]
               : [],
             riskLevel: 0,
@@ -171,7 +178,40 @@ export const sendMessage = async (req: Request, res: Response) => {
     const cleanAnalysisText = analysisText
       .replace(/```json\n|\n```/g, "")
       .trim();
-    const analysis = JSON.parse(cleanAnalysisText);
+
+    let analysis: {
+      emotionalState: string;
+      themes: string[];
+      riskLevel: number;
+      recommendedApproach: string;
+      progressIndicators: string[];
+    };
+
+    try {
+      const parsed = JSON.parse(cleanAnalysisText);
+      analysis = {
+        emotionalState: String(parsed?.emotionalState ?? "neutral"),
+        themes: Array.isArray(parsed?.themes) ? parsed.themes : [],
+        riskLevel:
+          typeof parsed?.riskLevel === "number" ? parsed.riskLevel : 0,
+        recommendedApproach: String(parsed?.recommendedApproach ?? ""),
+        progressIndicators: Array.isArray(parsed?.progressIndicators)
+          ? parsed.progressIndicators
+          : [],
+      };
+    } catch (parseError) {
+      logger.warn("Failed to parse Gemini analysis JSON, using fallback", {
+        parseError,
+        cleanAnalysisText,
+      });
+      analysis = {
+        emotionalState: "neutral",
+        themes: [],
+        riskLevel: 0,
+        recommendedApproach: "empathetic_support",
+        progressIndicators: [],
+      };
+    }
 
     logger.info("Message analysis:", analysis);
 
