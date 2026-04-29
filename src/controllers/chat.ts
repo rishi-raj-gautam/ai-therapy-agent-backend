@@ -86,11 +86,12 @@ export const sendMessage = async (req: Request, res: Response) => {
       .lean()
       .exec();
 
+    const parsedMoodTimestamp = latestMood?.timestamp
+      ? new Date(latestMood.timestamp)
+      : null;
     const moodTimestamp =
-      latestMood?.timestamp instanceof Date
-        ? latestMood.timestamp.toISOString()
-        : latestMood?.timestamp
-        ? new Date(latestMood.timestamp).toISOString()
+      parsedMoodTimestamp && !Number.isNaN(parsedMoodTimestamp.getTime())
+        ? parsedMoodTimestamp.toISOString()
         : "unknown";
 
     // Create Inngest event for message processing
@@ -128,8 +129,14 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     logger.info("Sending message to Inngest:", { event });
 
-    // Send event to Inngest for logging and analytics
-    await inngest.send(event);
+    // Send event to Inngest for logging and analytics (non-blocking for chat UX)
+    try {
+      await inngest.send(event);
+    } catch (inngestError) {
+      logger.warn("Failed to send Inngest event. Continuing chat flow.", {
+        inngestError,
+      });
+    }
 
     // Process the message directly using Gemini
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -173,12 +180,6 @@ export const sendMessage = async (req: Request, res: Response) => {
       "progressIndicators": ["string"]
     }`;
 
-    const analysisResult = await model.generateContent(analysisPrompt);
-    const analysisText = analysisResult.response.text().trim();
-    const cleanAnalysisText = analysisText
-      .replace(/```json\n|\n```/g, "")
-      .trim();
-
     let analysis: {
       emotionalState: string;
       themes: string[];
@@ -186,23 +187,41 @@ export const sendMessage = async (req: Request, res: Response) => {
       recommendedApproach: string;
       progressIndicators: string[];
     };
-
     try {
-      const parsed = JSON.parse(cleanAnalysisText);
-      analysis = {
-        emotionalState: String(parsed?.emotionalState ?? "neutral"),
-        themes: Array.isArray(parsed?.themes) ? parsed.themes : [],
-        riskLevel:
-          typeof parsed?.riskLevel === "number" ? parsed.riskLevel : 0,
-        recommendedApproach: String(parsed?.recommendedApproach ?? ""),
-        progressIndicators: Array.isArray(parsed?.progressIndicators)
-          ? parsed.progressIndicators
-          : [],
-      };
-    } catch (parseError) {
-      logger.warn("Failed to parse Gemini analysis JSON, using fallback", {
-        parseError,
-        cleanAnalysisText,
+      const analysisResult = await model.generateContent(analysisPrompt);
+      const analysisText = analysisResult.response.text().trim();
+      const cleanAnalysisText = analysisText
+        .replace(/```json\n|\n```/g, "")
+        .trim();
+
+      try {
+        const parsed = JSON.parse(cleanAnalysisText);
+        analysis = {
+          emotionalState: String(parsed?.emotionalState ?? "neutral"),
+          themes: Array.isArray(parsed?.themes) ? parsed.themes : [],
+          riskLevel:
+            typeof parsed?.riskLevel === "number" ? parsed.riskLevel : 0,
+          recommendedApproach: String(parsed?.recommendedApproach ?? ""),
+          progressIndicators: Array.isArray(parsed?.progressIndicators)
+            ? parsed.progressIndicators
+            : [],
+        };
+      } catch (parseError) {
+        logger.warn("Failed to parse Gemini analysis JSON, using fallback", {
+          parseError,
+          cleanAnalysisText,
+        });
+        analysis = {
+          emotionalState: "neutral",
+          themes: [],
+          riskLevel: 0,
+          recommendedApproach: "empathetic_support",
+          progressIndicators: [],
+        };
+      }
+    } catch (analysisError) {
+      logger.warn("Gemini analysis failed, using fallback analysis", {
+        analysisError,
       });
       analysis = {
         emotionalState: "neutral",
@@ -241,8 +260,15 @@ export const sendMessage = async (req: Request, res: Response) => {
     4. Maintains professional boundaries
     5. Considers safety and well-being`;
 
-    const responseResult = await model.generateContent(responsePrompt);
-    const response = responseResult.response.text().trim();
+    let response = "";
+    try {
+      const responseResult = await model.generateContent(responsePrompt);
+      response = responseResult.response.text().trim();
+    } catch (responseError) {
+      logger.error("Gemini response generation failed", { responseError });
+      response =
+        "I hear you, and I'm here with you. I'm having trouble generating a detailed response right now, but your feelings matter. Could you share a little more about what you're experiencing in this moment?";
+    }
 
     logger.info("Generated response:", response);
 
@@ -284,6 +310,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Error in sendMessage:", error);
+    console.log(error)
     res.status(500).json({
       message: "Error processing message",
       error: error instanceof Error ? error.message : "Unknown error",
